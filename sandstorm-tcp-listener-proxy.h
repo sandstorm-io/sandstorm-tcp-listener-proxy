@@ -93,68 +93,22 @@ namespace sandstorm {
     kj::String port;
   };
 
+  kj::Promise<capnp::Capability::Client> setupTcpProxy(SandstormApi<>::Client api, kj::AsyncIoProvider& provider, kj::ArrayPtr<const kj::byte> token, kj::StringPtr _localPort, kj::StringPtr _externalPort) {
+    auto localPort = kj::str(_localPort);
+    auto externalPort = kj::str(_externalPort);
+    auto req = api.restoreRequest();
+    req.setToken(token);
 
-  class TcpProxyListenerMain {
-  public:
-    TcpProxyListenerMain(kj::ProcessContext& context): context(context), handle(nullptr) { }
-
-    kj::MainFunc getMain() {
-       return kj::MainBuilder(context, "TcpProxyListener version: 0.0.1",
-                             "Runs a TCP listener proxy for bridging IpInterface to convential "
-                             "TCP listening applications.")
-        .expectArg("<token>", KJ_BIND_METHOD(*this, setToken))
-        .expectArg("<localPort>", KJ_BIND_METHOD(*this, setLocalPort))
-        .expectArg("<externalPort>", KJ_BIND_METHOD(*this, setExternalPort))
-        .callAfterParsing(KJ_BIND_METHOD(*this, run))
-        .build();
-    }
-
-    kj::MainBuilder::Validity setToken(kj::StringPtr _token) {
-      token = kj::heapString(_token);
-      return true;
-    }
-
-    kj::MainBuilder::Validity setLocalPort(kj::StringPtr _localPort) {
-      localPort = kj::heapString(_localPort);
-      return true;
-    }
-
-    kj::MainBuilder::Validity setExternalPort(kj::StringPtr _externalPort) {
-      externalPort = kj::heapString(_externalPort);
-      return true;
-    }
-
-    kj::MainBuilder::Validity run() {
-      capnp::EzRpcClient client("unix:/tmp/sandstorm-api");
-      SandstormHttpBridge::Client restorer = client.getMain<SandstormHttpBridge>();
-
-      auto request = restorer.getSandstormApiRequest();
-      auto api = request.send().getApi();
-      auto req = api.restoreRequest();
-      req.setToken(token.asBytes());
-
-      kj::Promise<void> promise = req.send().then([this, &client](auto args) mutable {
-        auto req = args.getCap().template castAs<sandstorm::IpInterface>().listenTcpRequest();
-        req.setPortNum(atoi(externalPort.cStr()));
-        req.setPort(kj::heap<TcpPortImpl>(client.getIoProvider(), localPort));
-        return req.send().then([this](auto args) mutable {
-          handle = args.getHandle();
-        });
+    return req.send().then([&provider, localPort = kj::mv(localPort), externalPort = kj::mv(externalPort), KJ_MVCAP(api)](auto args) mutable -> capnp::Capability::Client {
+      auto req = args.getCap().template castAs<sandstorm::IpInterface>().listenTcpRequest();
+      req.setPortNum(atoi(externalPort.cStr()));
+      req.setPort(kj::heap<TcpPortImpl>(provider, localPort));
+      return req.send().then([&](auto args) mutable {
+        return args.getHandle();
       });
-
-      // promise.wait(client.getWaitScope());
-      kj::NEVER_DONE.wait(client.getWaitScope());
-      return true;
-    }
-
-  private:
-    kj::ProcessContext& context;
-    kj::String token;
-    kj::String localPort;
-    kj::String externalPort;
-    sandstorm::Handle::Client handle;
-  };
-
+    }, [](kj::Exception err) -> capnp::Capability::Client {
+      KJ_LOG(ERROR, "some error in tcp proxy", err);
+      throw err;
+    });
+  }
 } // namespace sandstorm
-
-KJ_MAIN(sandstorm::TcpProxyListenerMain)
