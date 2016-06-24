@@ -16,6 +16,7 @@ clean:
 bin/sandstorm-tcp-listener-proxy: tmp/genfiles sandstorm-tcp-listener-proxy-main.c++ sandstorm-tcp-listener-proxy.h
 	@mkdir -p bin
 	@$(CXX) sandstorm-tcp-listener-proxy-main.c++ tmp/sandstorm/*.capnp.c++ -o bin/sandstorm-tcp-listener-proxy -static $(CXXFLAGS2) `pkg-config capnp-rpc --cflags --libs`
+	@cp bin/sandstorm-tcp-listener-proxy example/bin/
 
 tmp/genfiles: /opt/sandstorm/latest/usr/include/sandstorm/*.capnp
 	@echo "generating capnp files..."

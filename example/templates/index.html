@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Sandstorm tcp proxy example</title>
+  </head>
+  <body>
+
+<style>
+* {
+  font-size: 14pt;
+}
+h1 {
+  font-size: 24pt;
+}
+h2 {
+  font-size: 18pt;
+}
+iframe {
+  display: block;
+}
+p {
+  margin: 0;
+}
+#session-id, #user-id, #username, #preferred-handle, #permissions, #user-pronouns {
+  background-color: #eeeeee;
+}
+.token {
+  font-family: monospace;
+}
+</style>
+
+    <h1>Sandstorm tcp proxy example</h1>
+    <label>External port number: <input type="text" id="portNum" /></label>
+    <button id='powerbox-request-ipinterface' onclick="doRequest(interfaces.ipInterface);">Request IpInterface</button>
+    <p>
+      Listening on port: {{content.port}}
+    </p>
+  </body>
+
+<script type="text/javascript">
+interfaces = {
+  ipInterface: "EAZQAQEAABEBF1EEAQH_-tY-6W5QLOMAAAA", // 16369547182874744570,
+};
+function doRequest(serializedPowerboxDescriptor) {
+  window.parent.postMessage({ powerboxRequest: {
+    rpcId: "1",
+    query: [serializedPowerboxDescriptor]
+  }}, "*");
+}
+
+var messageListener = function(event) {
+  if (event.data.rpcId === '1') {
+    console.log("request completed", event.data);
+    if (event.data.error) {
+      console.log("error:", event.data.error);
+      return;
+    } else if (event.data.canceled) {
+      console.log("canceled");
+      return;
+    } else {
+      var xhr = new XMLHttpRequest();
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState === 4) {
+          if (xhr.status === 200) {
+            console.log("ok!");
+            window.location.reload();
+          } else {
+            console.log("failed to save token");
+          }
+        }
+      };
+      var capSaveUrl = window.location.protocol + '//' + window.location.host + '/caps';
+      xhr.open("POST", capSaveUrl, true);
+      var formData = new FormData();
+      formData.append("token", event.data.token);
+      formData.append("port", document.getElementById("portNum").value);
+      xhr.send(formData);
+    }
+  }
+}
+
+window.addEventListener('message', messageListener);
+  </script>
+</html>
