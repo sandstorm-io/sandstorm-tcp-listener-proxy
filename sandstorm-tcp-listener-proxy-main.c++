@@ -87,7 +87,7 @@ namespace sandstorm {
       auto tokenBytes = token.asBytes();
       auto proxy = setupTcpProxy(kj::mv(api), client.getIoProvider(), tokenBytes, kj::str(localPort), kj::str(externalPort));
 
-      // promise.wait(client.getWaitScope());
+      auto handle = proxy.wait(client.getWaitScope());
       kj::NEVER_DONE.wait(client.getWaitScope());
       return true;
     }
