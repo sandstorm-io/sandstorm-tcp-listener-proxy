@@ -18,5 +18,4 @@ while 1:
     data = client.recv(size)
     if data:
         client.send(data)
-    client.shutdown()
     client.close()
