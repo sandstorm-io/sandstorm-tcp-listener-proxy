@@ -48,6 +48,19 @@
 #include "sandstorm-tcp-listener-proxy.h"
 
 namespace sandstorm {
+  kj::Maybe<kj::AutoCloseFd> raiiOpenIfExists(kj::StringPtr name, int flags, mode_t  mode = 0666) {
+    int fd = open(name.cStr(), flags, mode);
+    if (fd == -1) {
+      if (errno == ENOENT) {
+        return nullptr;
+      } else {
+        KJ_FAIL_SYSCALL("open", errno, name);
+      }
+    } else {
+      return kj::AutoCloseFd(fd);
+    }
+  }
+
   class TcpProxyListenerMain {
   public:
     TcpProxyListenerMain(kj::ProcessContext& context): context(context), handle(nullptr) { }
@@ -59,6 +72,7 @@ namespace sandstorm {
         .expectArg("<token>", KJ_BIND_METHOD(*this, setToken))
         .expectArg("<localPort>", KJ_BIND_METHOD(*this, setLocalPort))
         .expectArg("<externalPort>", KJ_BIND_METHOD(*this, setExternalPort))
+        .expectOptionalArg("<claimSessionId>", KJ_BIND_METHOD(*this, setSessionId))
         .callAfterParsing(KJ_BIND_METHOD(*this, run))
         .build();
     }
@@ -78,13 +92,36 @@ namespace sandstorm {
       return true;
     }
 
+    kj::MainBuilder::Validity setSessionId(kj::StringPtr _sessionId) {
+      sessionId = kj::heapString(_sessionId);
+      return true;
+    }
+
     kj::MainBuilder::Validity run() {
       capnp::EzRpcClient client("unix:/tmp/sandstorm-api");
       SandstormHttpBridge::Client restorer = client.getMain<SandstormHttpBridge>();
 
+      auto tokenBytes = token.asBytes();
       auto request = restorer.getSandstormApiRequest();
       auto api = request.send().getApi();
-      auto tokenBytes = token.asBytes();
+      kj::Array<unsigned char> byteArray;
+      if (sessionId.size() != 0) {
+        // This has a sessionId, so treat it as a claimrequest token
+        auto contextRequest = restorer.getSessionContextRequest();
+        contextRequest.setId(sessionId);
+        auto context = contextRequest.send().wait(client.getWaitScope()).getContext();
+        auto claimRequest = context.claimRequestRequest();
+        claimRequest.setRequestToken(token);
+        auto cap = claimRequest.send().wait(client.getWaitScope()).getCap();
+        auto saveRequest = api.saveRequest();
+        saveRequest.setCap(cap);
+        auto saveResults = saveRequest.send().wait(client.getWaitScope());
+        byteArray = kj::heapArray(saveResults.getToken());
+        tokenBytes = byteArray;
+        KJ_IF_MAYBE(fd, raiiOpenIfExists("/var/token", O_WRONLY | O_CLOEXEC)) {
+          kj::FdOutputStream(kj::mv(*fd)).write(tokenBytes.begin(), tokenBytes.size());
+        }
+      }
       auto proxy = setupTcpProxy(kj::mv(api), client.getIoProvider(), tokenBytes, kj::str(localPort), kj::str(externalPort));
 
       auto handle = proxy.wait(client.getWaitScope());
@@ -97,6 +134,7 @@ namespace sandstorm {
     kj::String token;
     kj::String localPort;
     kj::String externalPort;
+    kj::String sessionId;
     sandstorm::Handle::Client handle;
   };
 
